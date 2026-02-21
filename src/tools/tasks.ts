@@ -111,7 +111,7 @@ export function registerTaskTools(
   // ─── taskhub_task_create ────────────────────────────────────────
   server.tool(
     'taskhub_task_create',
-    'Create a new task. For project tasks, uses the linked project from .taskhub.json unless a different projectId is specified. If projectId differs from the linked project, a warning is shown.',
+    'Create a new task. IMPORTANT: Before calling this tool, ALWAYS ask the user to confirm: (1) whether this is a "project" task or a "daily" routine task, and (2) confirm the linked project context. When a project is linked via .taskhub.json, ALL tasks (project and daily) are associated to it by default. Only omit projectId if the user explicitly says the task is not related to any project. If projectId differs from the linked project, a warning is shown.',
     {
       title: z.string().describe('Task title'),
       description: z.string().optional().describe('Task description'),
@@ -131,17 +131,16 @@ export function registerTaskTools(
         let effectiveProjectId = projectId;
         let warning = '';
 
-        if (type === 'project') {
-          if (!projectId && ctx) {
-            effectiveProjectId = ctx.projectId;
-          } else if (projectId && ctx && projectId !== ctx.projectId) {
-            warning = `⚠️ WARNING: You are in project "${ctx.projectName}" but creating a task in a different project (${projectId}).\n\n`;
-          } else if (!projectId && !ctx) {
-            return errorResult(
-              'No project specified and no project linked to this directory. ' +
-                'Use taskhub_connect to link a project first, or pass projectId explicitly.',
-            );
-          }
+        // Auto-link to project context for ALL task types (project and daily)
+        if (!projectId && ctx) {
+          effectiveProjectId = ctx.projectId;
+        } else if (projectId && ctx && projectId !== ctx.projectId) {
+          warning = `⚠️ WARNING: You are in project "${ctx.projectName}" but creating a task in a different project (${projectId}).\n\n`;
+        } else if (!projectId && !ctx && type === 'project') {
+          return errorResult(
+            'No project specified and no project linked to this directory. ' +
+              'Use taskhub_connect to link a project first, or pass projectId explicitly.',
+          );
         }
 
         const body: Record<string, unknown> = {
@@ -157,7 +156,10 @@ export function registerTaskTools(
         };
 
         const task = await api.post<Task>('/tasks', body);
-        return textResult(warning + `Task created:\n${formatTask(task)}`);
+        const ctxNote = effectiveProjectId && ctx && effectiveProjectId === ctx.projectId
+          ? `📌 Linked to project: ${ctx.projectName}\n`
+          : '';
+        return textResult(warning + ctxNote + `Task created:\n${formatTask(task)}`);
       } catch (e) {
         return errorResult(e);
       }

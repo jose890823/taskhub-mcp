@@ -158,12 +158,16 @@ export interface Task {
 
 export interface TaskAssignee {
   id: string;
-  user: {
+  user?: {
     id: string;
     email: string;
     firstName: string;
     lastName: string;
   };
+  /** Flat shape returned by hydrated backend responses */
+  firstName?: string;
+  lastName?: string;
+  email?: string;
 }
 
 // ─── Comments ─────────────────────────────────────────────────────

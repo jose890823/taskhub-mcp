@@ -18,7 +18,10 @@ export function formatTask(t: Task): string {
   ];
   if (t.project) parts.push(`  Project: ${t.project.name}`);
   if (t.assignees?.length) {
-    parts.push(`  Assigned: ${t.assignees.map(a => `${a.user.firstName} ${a.user.lastName}`).join(', ')}`);
+    const names = t.assignees
+      .map(a => a.user ? `${a.user.firstName} ${a.user.lastName}` : a.firstName ? `${a.firstName} ${a.lastName}` : 'Unknown')
+      .join(', ');
+    parts.push(`  Assigned: ${names}`);
   }
   if (t.dueDate) parts.push(`  Due: ${t.dueDate}`);
   if (t.scheduledDate) parts.push(`  Scheduled: ${t.scheduledDate}`);
