@@ -2,9 +2,43 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { ApiClient } from '../api-client.js';
 import type { ScopeChecker } from '../scopes.js';
-import type { ProjectDetail } from '../types.js';
-import { readContext, writeContext } from '../context.js';
+import type { Project, ProjectDetail } from '../types.js';
+import { readContext, writeContext, resolveActiveProject } from '../context.js';
 import { textResult, errorResult, formatProject } from './helpers.js';
+
+/**
+ * Helper: builds the "no project connected" message with available projects.
+ * Used by taskhub_context and exported for other tools to reuse.
+ */
+export async function buildNoContextMessage(api: ApiClient): Promise<string> {
+  const lines = [
+    'No project linked to this directory.',
+    '',
+  ];
+
+  try {
+    const projects = await api.get<Project[]>('/projects');
+    const arr = Array.isArray(projects) ? projects : [];
+
+    if (arr.length) {
+      lines.push('Available projects:');
+      arr.forEach((p, i) => {
+        const desc = p.description ? ` — ${p.description}` : '';
+        lines.push(`  ${i + 1}. ${p.name} (${p.systemCode})${desc}`);
+      });
+      lines.push('');
+      lines.push('To connect, ask the user which project this directory belongs to, then call:');
+      lines.push('  taskhub_connect({systemCode: "PRJ-XXXXXX-XXXX"})');
+      lines.push('Or create a new project with taskhub_project_create, then connect it.');
+    } else {
+      lines.push('No projects found. Create one with taskhub_project_create first.');
+    }
+  } catch {
+    lines.push('Could not fetch projects (are you logged in?). Use taskhub_login first.');
+  }
+
+  return lines.join('\n');
+}
 
 export function registerContextTools(
   server: McpServer,
@@ -14,16 +48,14 @@ export function registerContextTools(
   // ─── taskhub_context ────────────────────────────────────────────
   server.tool(
     'taskhub_context',
-    'Show the project linked to the current working directory (from .taskhub.json).',
+    'Show the project linked to the current working directory. If no project is linked, automatically lists available projects so the user can choose one to connect.',
     {},
     async () => {
       try {
         const ctx = readContext();
         if (!ctx) {
-          return textResult(
-            'No project linked to this directory.\n' +
-              'Use taskhub_connect to link a project, or taskhub_projects_list to see available projects.',
-          );
+          const msg = await buildNoContextMessage(api);
+          return textResult(msg);
         }
         const lines = [
           `Linked Project: ${ctx.projectName}`,
@@ -34,6 +66,22 @@ export function registerContextTools(
             ? `  Organization: ${ctx.organizationName} (${ctx.organizationId})`
             : `  Type: Personal project`,
         ];
+
+        if (ctx.subProjects && ctx.subProjects.length > 0) {
+          lines.push(`\n  Sub-projects:`);
+          for (const sub of ctx.subProjects) {
+            lines.push(`    ${sub.path} → ${sub.projectName} (${sub.systemCode})`);
+          }
+
+          // Show active project based on cwd
+          const activeSub = resolveActiveProject(ctx);
+          if (activeSub) {
+            lines.push(`\n  Active (based on cwd): ${activeSub.projectName} (${activeSub.systemCode})`);
+          } else {
+            lines.push(`\n  Active (based on cwd): ${ctx.projectName} (root)`);
+          }
+        }
+
         return textResult(lines.join('\n'));
       } catch (e) {
         return errorResult(e);
@@ -68,6 +116,18 @@ export function registerContextTools(
           return errorResult('Provide one of: projectId, slug, or systemCode');
         }
 
+        // Preserve subProjects if reconnecting to the same project
+        const existingCtx = readContext();
+        const preserveSubProjects = existingCtx?.projectId === project.id
+          ? existingCtx.subProjects
+          : undefined;
+
+        // Build warning if sub-projects were dropped by switching to a different project
+        let subProjectWarning = '';
+        if (existingCtx?.subProjects?.length && !preserveSubProjects) {
+          subProjectWarning = `\n\n⚠️ Previous sub-project mappings (${existingCtx.subProjects.length}) were cleared because you connected to a different project. Use taskhub_subproject_add to re-configure them.`;
+        }
+
         writeContext({
           projectId: project.id,
           projectName: project.name,
@@ -75,11 +135,13 @@ export function registerContextTools(
           systemCode: project.systemCode,
           organizationId: project.organizationId,
           organizationName: project.organization?.name || null,
+          subProjects: preserveSubProjects,
         });
 
         return textResult(
           `Directory linked to project:\n${formatProject(project)}\n\n` +
-            `.taskhub.json created. Task operations will now default to this project.`,
+            `.taskhub.json ${existingCtx ? 'updated' : 'created'}. Task operations will now default to this project.` +
+            subProjectWarning,
         );
       } catch (e) {
         return errorResult(e);

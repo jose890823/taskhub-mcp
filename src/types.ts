@@ -59,6 +59,13 @@ export interface McpScopesResponse {
 }
 
 // ─── Context (.taskhub.json) ──────────────────────────────────────
+export interface SubProjectEntry {
+  path: string;         // Relative path from .taskhub.json, e.g. "./backend"
+  projectId: string;
+  projectName: string;
+  systemCode: string;
+}
+
 export interface ProjectContext {
   projectId: string;
   projectName: string;
@@ -66,6 +73,7 @@ export interface ProjectContext {
   systemCode: string;
   organizationId: string | null;
   organizationName: string | null;
+  subProjects?: SubProjectEntry[];  // Optional: sub-project path mappings
 }
 
 // ─── Organizations ────────────────────────────────────────────────
@@ -99,6 +107,9 @@ export interface Project {
   description: string | null;
   organizationId: string | null;
   organization?: Organization;
+  parentId?: string | null;
+  parent?: { id: string; name: string; systemCode: string } | null;
+  childCount?: number;
   createdAt: string;
 }
 
@@ -132,6 +143,7 @@ export interface TaskStatus {
   color: string;
   position: number;
   isDefault: boolean;
+  isCompleted: boolean;
 }
 
 // ─── Tasks ────────────────────────────────────────────────────────
