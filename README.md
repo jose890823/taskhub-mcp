@@ -2,7 +2,7 @@
 
 MCP (Model Context Protocol) server for **TaskHub** — full platform control via Claude Code.
 
-25 tools for managing tasks, projects, organizations, comments, notifications, invitations, and activity — all from your terminal through Claude.
+Tools for managing tasks, projects, organizations, comments, notifications, invitations, and activity — all from your terminal through Claude.
 
 ## Quick Start
 
@@ -17,7 +17,8 @@ Add to your `.mcp.json` (project or global):
       "command": "node",
       "args": ["/path/to/taskhub-mcp/dist/index.js"],
       "env": {
-        "TASKHUB_API_URL": "http://localhost:3001/api"
+        "TASKHUB_API_URL": "http://localhost:3001/api",
+        "TASKHUB_API_TOKEN": "<project-bound-api-key>"
       }
     }
   }
@@ -34,20 +35,22 @@ Or install from GitHub:
       "args": ["github:jose890823/taskhub-mcp"],
       "env": {
         "TASKHUB_API_URL": "https://api.taskhub.com/api",
-        "TASKHUB_API_TOKEN": "optional-jwt-token"
+        "TASKHUB_API_TOKEN": "<project-bound-api-key>"
       }
     }
   }
 }
 ```
 
-### 2. Authenticate
+### 2. Configure the API key
 
-```
-Use taskhub_login with email and password
-```
+Create a project-bound TaskHub API key, provide it as `TASKHUB_API_TOKEN` in the
+MCP host environment, and restart the MCP process after changing it. The key is
+loaded once and held in memory only; it is not persisted, refreshed, converted,
+or recoverable by the server.
 
-Or set `TASKHUB_API_TOKEN` in env to skip interactive login.
+Use `taskhub_whoami` to validate the key and inspect server metadata. There is
+no password login or JWT migration path.
 
 ### 3. Link a project
 
@@ -62,15 +65,17 @@ This creates `.taskhub.json` in your working directory. Subsequent task operatio
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `TASKHUB_API_URL` | `http://localhost:3001/api` | TaskHub backend API URL |
-| `TASKHUB_API_TOKEN` | — | JWT token (skips interactive login) |
+| `TASKHUB_API_TOKEN` | — | The only credential: an opaque project-bound API key held in memory |
 
-## Tools (25)
+Remote API URLs must use HTTPS. Plain HTTP is reserved for local development
+with `localhost` or `127.0.0.1`.
+
+## Tools
 
 ### Auth & System
 | Tool | Description |
 |------|-------------|
-| `taskhub_login` | Login with email/password, saves JWT to ~/.taskhub/ |
-| `taskhub_whoami` | Current user, scopes, and linked project |
+| `taskhub_whoami` | Current user metadata, server scopes, and linked/effective project context |
 
 ### Context
 | Tool | Description |
@@ -145,11 +150,48 @@ When you run `taskhub_connect`, a `.taskhub.json` file is created in your direct
 This enables:
 - `taskhub_task_create` auto-assigns to the linked project
 - `taskhub_tasks_list` auto-filters by the linked project
-- Warning if you create a task for a different project than the one linked
+- Project-sensitive requests use one effective project ID; missing, ambiguous,
+  or mismatched context fails closed rather than switching key bindings
 
-## Scopes & Future Monetization
+## Authorization and failure contract
 
-The server checks user scopes via `GET /auth/mcp-scopes` before executing tools. Currently all authenticated users have all scopes. In the future, scopes can be filtered by subscription plan (free/pro/enterprise).
+The client performs advisory scope preflight through `GET /auth/mcp-scopes` and
+may cache the result for five minutes. The cache never authorizes a request or
+overrides server-side key validity, scopes, revocation, or project binding.
+
+Only these confirmed backend combinations receive classified guidance:
+
+| HTTP | Code | Meaning and action |
+|------|------|-------------------|
+| 401 | `API_KEY_INVALID` | Missing, malformed, unknown, verifier-mismatched, revoked, expired, or inactive key. Configure a valid replacement. A locally absent token fails before any request. |
+| 403 | `INSUFFICIENT_SCOPE` | The key lacks the required scope. Ask a TaskHub administrator to grant the required access. |
+| 403 | `PROJECT_ACCESS_DENIED` | Missing context, project mismatch, or unauthorized project access. Verify the linked project or contact an administrator. |
+
+Unknown status/code combinations use generic safe guidance. Tokens, passwords,
+authorization headers, endpoint configuration, and raw backend details are not
+returned in tool errors or startup diagnostics.
+
+`taskhub_whoami` is metadata-only: it reports user metadata, server scopes, and
+local/effective context, never the API key.
+
+## Migration, rollout, and rollback
+
+1. Create a new project-bound key; do not convert a password, JWT, or legacy key.
+2. Configure `TASKHUB_API_TOKEN` outside source control and validate with
+   `taskhub_whoami`.
+3. Link the working directory with `taskhub_connect` and verify the effective
+   project before project-sensitive operations.
+4. For a revoked, expired, or inactive key, revoke it at the server, create a
+   replacement, update the host environment, and restart the MCP process.
+
+To roll back a deployment, stop the MCP process and restore the previously
+published version from its versioned source or package. Reconfigure the
+environment as required; never restore or copy credential files. Any live or
+mutating validation for this migration must be explicitly opted in; its harness
+conversion is tracked separately and is not part of this documentation slice.
+
+Package/release validation and the remaining migration test work are tracked
+separately; this README does not claim those checks have passed.
 
 ## Development
 

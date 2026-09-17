@@ -1,7 +1,12 @@
 src/
+tests/
 *.ts
 !dist/**
 tsconfig.json
+vitest.config.*
 .env
+.env.*
 *.tsbuildinfo
 node_modules/
+.taskhub.json
+SECURITY.md

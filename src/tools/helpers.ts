@@ -1,11 +1,34 @@
-import type { Task, Project, Organization, Comment, Notification } from '../types.js';
+import type { Task, TaskStatus, Project, ProjectMember, Organization, Comment, Notification } from '../types.js';
+import { ApiError, AuthRequiredError } from '../api-client.js';
+
+export const DIAGNOSTIC_ENDPOINT_LABEL = 'configured endpoint';
+const GENERIC_ERROR_MESSAGE = 'TaskHub request failed. Check your configuration and try again.';
+
+export function redactEndpointForDiagnostic(_endpoint: string): string {
+  return DIAGNOSTIC_ENDPOINT_LABEL;
+}
+
+export function startupDiagnostic(endpoint: string): string {
+  return `TaskHub MCP Server running (API: ${redactEndpointForDiagnostic(endpoint)})`;
+}
+
+export function writeStartupDiagnostic(
+  endpoint: string,
+  writeError: (message: string) => void = console.error,
+): void {
+  writeError(startupDiagnostic(endpoint));
+}
 
 export function textResult(text: string): { content: Array<{ type: 'text'; text: string }> } {
   return { content: [{ type: 'text' as const, text }] };
 }
 
 export function errorResult(error: unknown): { content: Array<{ type: 'text'; text: string }>; isError: true } {
-  const msg = error instanceof Error ? error.message : String(error);
+  const msg = error instanceof ApiError || error instanceof AuthRequiredError
+    ? error.message
+    : typeof error === 'string' && !/(authorization|bearer|password|token|https?:\/\/)/i.test(error)
+      ? error
+      : GENERIC_ERROR_MESSAGE;
   return { content: [{ type: 'text' as const, text: `Error: ${msg}` }], isError: true };
 }
 
@@ -66,6 +89,24 @@ export function formatComment(c: Comment): string {
 export function formatNotification(n: Notification): string {
   const read = n.readAt ? 'READ' : 'UNREAD';
   return `[${read}] ${n.title}\n  ${n.message}\n  ${n.createdAt}`;
+}
+
+export function formatStatus(s: TaskStatus): string {
+  const flags: string[] = [];
+  if (s.isDefault) flags.push('DEFAULT');
+  if (s.isCompleted) flags.push('COMPLETED');
+  const flagStr = flags.length ? ` [${flags.join(', ')}]` : '';
+  return `  - ${s.name} (id: ${s.id})${flagStr}`;
+}
+
+export function formatStatusList(statuses: TaskStatus[]): string {
+  if (!statuses.length) return 'No statuses found.';
+  return statuses.map(formatStatus).join('\n');
+}
+
+export function formatMember(m: ProjectMember): string {
+  const name = `${m.user.firstName} ${m.user.lastName}`;
+  return `  - ${name} (${m.user.email}) — ${m.role} [userId: ${m.user.id}]`;
 }
 
 export function paginationInfo(data: unknown): string {

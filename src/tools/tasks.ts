@@ -3,8 +3,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { ApiClient } from '../api-client.js';
 import type { ScopeChecker } from '../scopes.js';
 import type { Task, TaskStatus, ProjectDetail } from '../types.js';
-import { readContext, getEffectiveProjectId, getAllProjectIds } from '../context.js';
-import { buildNoContextMessage } from './context.js';
+import { getRequestContext, readContext, withProjectContext } from '../context.js';
 import {
   textResult,
   errorResult,
@@ -12,6 +11,25 @@ import {
   formatTaskList,
   paginationInfo,
 } from './helpers.js';
+
+function projectRequest(
+  params: Record<string, string | undefined>,
+  allowGlobal = false,
+) {
+  const linked = readContext();
+  const context = getRequestContext();
+  if (linked?.subProjects && new Set(linked.subProjects.map((sub) => sub.path)).size !== linked.subProjects.length) {
+    throw new Error('Ambiguous linked project context.');
+  }
+  if (!context.projectId && (!allowGlobal || params.projectId)) {
+    throw new Error('A linked project context is required.');
+  }
+  return { linked, context, params: withProjectContext(params, context) };
+}
+
+function scopedPath(path: string, params: Record<string, string | undefined>): string {
+  return params.projectId ? `${path}?projectId=${encodeURIComponent(params.projectId)}` : path;
+}
 
 export function registerTaskTools(
   server: McpServer,
@@ -35,31 +53,22 @@ export function registerTaskTools(
       try {
         await scopes.checkScope('tasks:read');
 
-        // Auto-detect project from context if not specified
-        const ctx = readContext();
-        const effectiveProjectId = projectId || (ctx ? getEffectiveProjectId(ctx) : undefined);
-
-        const params: Record<string, string | undefined> = {
-          projectId: effectiveProjectId,
+        const { linked: ctx, context, params } = projectRequest({
+          projectId,
           statusId,
           type,
           assignedToId,
           organizationId,
           page: page?.toString(),
           limit: limit?.toString(),
-        };
+        }, type === 'daily');
 
         const tasks = await api.get<Task[]>('/tasks', params);
         const arr = Array.isArray(tasks) ? tasks : [];
 
         let header = '';
-        if (!projectId && ctx) {
-          // Show the active project name (may be a sub-project based on cwd)
-          const activeName = ctx.subProjects?.length
-            ? (getEffectiveProjectId(ctx) !== ctx.projectId
-              ? ctx.subProjects.find(s => s.projectId === getEffectiveProjectId(ctx))?.projectName || ctx.projectName
-              : ctx.projectName)
-            : ctx.projectName;
+        if (!projectId && ctx && context.projectId) {
+          const activeName = ctx.subProjects?.find(s => s.projectId === context.projectId)?.projectName || ctx.projectName;
           header = `[Auto-filtered by linked project: ${activeName}]\n\n`;
         }
 
@@ -80,7 +89,7 @@ export function registerTaskTools(
     async ({ type }) => {
       try {
         await scopes.checkScope('tasks:read');
-        const params: Record<string, string | undefined> = { type };
+        const { params } = projectRequest({ type }, type === 'daily');
         const tasks = await api.get<Task[]>('/tasks/my', params);
         const arr = Array.isArray(tasks) ? tasks : [];
         return textResult(formatTaskList(arr) + paginationInfo(tasks));
@@ -100,7 +109,7 @@ export function registerTaskTools(
     async ({ date }) => {
       try {
         await scopes.checkScope('tasks:read');
-        const params: Record<string, string | undefined> = { date };
+        const { params } = projectRequest({ date }, true);
         const tasks = await api.get<Task[]>('/tasks/daily', params);
         const arr = Array.isArray(tasks) ? tasks : [];
         const dateStr = date || new Date().toISOString().split('T')[0];
@@ -126,25 +135,18 @@ export function registerTaskTools(
       try {
         await scopes.checkScope('tasks:read');
 
+        const { params } = projectRequest({});
+
         // If it looks like a UUID or systemCode, fetch directly
         const isDirectId = identifier.match(/^[0-9a-f-]{36}$/i) || identifier.match(/^TSK-/i);
 
         if (isDirectId) {
-          const task = await api.get<Task>(`/tasks/${identifier}`);
+          const task = await api.get<Task>(`/tasks/${identifier}`, params);
           return textResult(formatTask(task));
         }
 
         // Otherwise, search by title in project tasks
-        const ctx = readContext();
-        const allIds = ctx ? getAllProjectIds(ctx) : [];
-        // Backend limits projectIds to 10 — cap to avoid 400 errors
-        const cappedIds = allIds.slice(0, 10);
-        const effectiveId = ctx ? getEffectiveProjectId(ctx) : undefined;
-        const searchParams: Record<string, string | undefined> = cappedIds.length > 1
-          ? { projectIds: cappedIds.join(','), limit: '50' }
-          : { projectId: effectiveId, limit: '50' };
-        const params: Record<string, string | undefined> = searchParams;
-        const tasks = await api.get<Task[]>('/tasks', params);
+        const tasks = await api.get<Task[]>('/tasks', { ...params, limit: '50' });
         const arr = Array.isArray(tasks) ? tasks : [];
 
         const term = identifier.toLowerCase();
@@ -158,7 +160,7 @@ export function registerTaskTools(
         }
         if (matches.length === 1) {
           // Fetch full detail for the single match
-          const task = await api.get<Task>(`/tasks/${matches[0].id}`);
+          const task = await api.get<Task>(`/tasks/${matches[0].id}`, params);
           return textResult(formatTask(task));
         }
 
@@ -192,48 +194,34 @@ export function registerTaskTools(
     async ({ title, description, type, priority, projectId, statusId, scheduledDate, dueDate, assignedToIds }) => {
       try {
         await scopes.checkScope('tasks:write');
-        const ctx = readContext();
-
-        let effectiveProjectId = projectId;
-        let warning = '';
-
-        // Auto-link to project context for ALL task types (project and daily)
-        // Uses getEffectiveProjectId to resolve sub-project based on cwd
-        if (!projectId && ctx) {
-          effectiveProjectId = getEffectiveProjectId(ctx);
-        } else if (projectId && ctx && projectId !== ctx.projectId) {
-          warning = `⚠️ WARNING: You are in project "${ctx.projectName}" but creating a task in a different project (${projectId}).\n\n`;
-        } else if (!projectId && !ctx && type === 'project') {
-          const msg = await buildNoContextMessage(api);
-          return textResult('Cannot create project task without a linked project.\n\n' + msg);
-        }
+        const { linked: ctx, params } = projectRequest({ projectId }, type === 'daily');
 
         const body: Record<string, unknown> = {
           title,
           description,
           type,
           priority,
-          projectId: effectiveProjectId,
+          projectId: params.projectId,
           statusId,
           scheduledDate,
           dueDate,
           assignedToIds,
         };
 
-        const task = await api.post<Task>('/tasks', body);
+        const task = await api.post<Task>(scopedPath('/tasks', params), body);
         // Determine which project name to show (may be a sub-project)
         const linkedProjectName = ctx
-          ? (ctx.subProjects?.find(s => s.projectId === effectiveProjectId)?.projectName ?? ctx.projectName)
+          ? (ctx.subProjects?.find(s => s.projectId === params.projectId)?.projectName ?? ctx.projectName)
           : null;
-        const ctxNote = effectiveProjectId && linkedProjectName
+        const ctxNote = params.projectId && linkedProjectName
           ? `📌 Linked to project: ${linkedProjectName}\n`
           : '';
 
         // Fetch available statuses so AI knows what options exist
         let statusInfo = '';
-        if (effectiveProjectId) {
+        if (params.projectId) {
           try {
-            const statuses = await api.get<TaskStatus[]>(`/projects/${effectiveProjectId}/statuses`);
+            const statuses = await api.get<TaskStatus[]>(`/projects/${params.projectId}/statuses`, params);
             const arr = Array.isArray(statuses) ? statuses : [];
             if (arr.length) {
               const names = arr.map(s =>
@@ -244,7 +232,7 @@ export function registerTaskTools(
           } catch { /* ignore status fetch failure */ }
         }
 
-        return textResult(warning + ctxNote + `Task created:\n${formatTask(task)}${statusInfo}`);
+        return textResult(ctxNote + `Task created:\n${formatTask(task)}${statusInfo}`);
       } catch (e) {
         return errorResult(e);
       }
@@ -268,6 +256,7 @@ export function registerTaskTools(
     async ({ taskId, ...updates }) => {
       try {
         await scopes.checkScope('tasks:write');
+        const { params } = projectRequest({});
 
         // Remove undefined values
         const body: Record<string, unknown> = {};
@@ -275,7 +264,7 @@ export function registerTaskTools(
           if (v !== undefined) body[k] = v;
         }
 
-        const task = await api.patch<Task>(`/tasks/${taskId}`, body);
+        const task = await api.patch<Task>(scopedPath(`/tasks/${taskId}`, params), body);
         return textResult(`Task updated:\n${formatTask(task)}`);
       } catch (e) {
         return errorResult(e);
@@ -293,9 +282,10 @@ export function registerTaskTools(
     async ({ taskId }) => {
       try {
         await scopes.checkScope('tasks:write');
+        const { params } = projectRequest({});
 
         // Get the task to find its project
-        const task = await api.get<Task>(`/tasks/${taskId}`);
+        const task = await api.get<Task>(`/tasks/${taskId}`, params);
 
         if (task.completedAt) {
           return textResult(`Task [${task.systemCode}] "${task.title}" is already completed.`);
@@ -305,7 +295,7 @@ export function registerTaskTools(
         let completedStatusId: string | null = null;
 
         if (task.projectId) {
-          const statuses = await api.get<TaskStatus[]>(`/projects/${task.projectId}/statuses`);
+          const statuses = await api.get<TaskStatus[]>(`/projects/${task.projectId}/statuses`, params);
           const completedStatus = (Array.isArray(statuses) ? statuses : []).find((s) => s.isCompleted);
           if (completedStatus) {
             completedStatusId = completedStatus.id;
@@ -330,7 +320,7 @@ export function registerTaskTools(
           );
         }
 
-        const updated = await api.patch<Task>(`/tasks/${taskId}`, {
+        const updated = await api.patch<Task>(scopedPath(`/tasks/${taskId}`, params), {
           statusId: completedStatusId,
         });
         return textResult(`Task completed:\n${formatTask(updated)}`);
@@ -354,6 +344,7 @@ export function registerTaskTools(
     async ({ parentTaskId, title, description, priority, assignedToIds }) => {
       try {
         await scopes.checkScope('tasks:write');
+        const { params } = projectRequest({});
 
         const body: Record<string, unknown> = {
           title,
@@ -363,7 +354,7 @@ export function registerTaskTools(
         };
 
         const subtask = await api.post<Task>(
-          `/tasks/${parentTaskId}/subtasks`,
+          scopedPath(`/tasks/${parentTaskId}/subtasks`, params),
           body,
         );
         return textResult(`Subtask created:\n${formatTask(subtask)}`);
@@ -384,8 +375,9 @@ export function registerTaskTools(
     async ({ taskId, confirm }) => {
       try {
         await scopes.checkScope('tasks:write');
+        const { params } = projectRequest({});
 
-        const task = await api.get<Task>(`/tasks/${taskId}`);
+        const task = await api.get<Task>(`/tasks/${taskId}`, params);
 
         if (!confirm) {
           return textResult(
@@ -395,7 +387,7 @@ export function registerTaskTools(
           );
         }
 
-        await api.del(`/tasks/${taskId}`);
+        await api.del(scopedPath(`/tasks/${taskId}`, params));
 
         return textResult(
           `Task deleted: [${task.systemCode}] "${task.title}" (${task.type}, priority: ${task.priority})`,

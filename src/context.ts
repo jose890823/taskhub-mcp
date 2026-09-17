@@ -4,6 +4,17 @@ import type { ProjectContext, SubProjectEntry } from './types.js';
 
 const CONTEXT_FILE = '.taskhub.json';
 
+export interface RequestContext {
+  projectId: string | null;
+  projectName?: string;
+  projectSlug?: string;
+  systemCode?: string;
+  organizationId?: string | null;
+  organizationName?: string | null;
+}
+
+export type ProjectRequestParams = Record<string, string | undefined>;
+
 export function readContext(cwd?: string): ProjectContext | null {
   try {
     const filePath = join(cwd || process.cwd(), CONTEXT_FILE);
@@ -12,6 +23,57 @@ export function readContext(cwd?: string): ProjectContext | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Resolves the project identity that may be sent to the API for this request.
+ * A missing context deliberately produces a null project so callers can keep
+ * the backend's global-status path without inventing a project binding.
+ */
+export function getRequestContext(contextDir?: string): RequestContext {
+  const ctx = readContext(contextDir);
+  if (!ctx?.projectId) return { projectId: null };
+
+  const activeSubProject = resolveActiveProject(ctx, contextDir);
+  if (activeSubProject) {
+    return {
+      projectId: activeSubProject.projectId,
+      projectName: activeSubProject.projectName,
+      systemCode: activeSubProject.systemCode,
+      organizationId: ctx.organizationId,
+      organizationName: ctx.organizationName,
+    };
+  }
+
+  return {
+    projectId: ctx.projectId,
+    projectName: ctx.projectName,
+    projectSlug: ctx.projectSlug,
+    systemCode: ctx.systemCode,
+    organizationId: ctx.organizationId,
+    organizationName: ctx.organizationName,
+  };
+}
+
+/**
+ * Adds the effective linked project to request parameters without allowing an
+ * explicit project to override it. With no linked project, projectId is
+ * removed so global endpoints retain their global behavior.
+ */
+export function withProjectContext(
+  params: ProjectRequestParams,
+  context: RequestContext,
+): ProjectRequestParams {
+  if (!context.projectId) {
+    const { projectId: _projectId, ...globalParams } = params;
+    return globalParams;
+  }
+
+  if (params.projectId && params.projectId !== context.projectId) {
+    throw new Error('Explicit project does not match the linked project context.');
+  }
+
+  return { ...params, projectId: context.projectId };
 }
 
 export function writeContext(ctx: ProjectContext, cwd?: string): void {

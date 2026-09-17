@@ -3,7 +3,18 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { ApiClient } from '../api-client.js';
 import type { ScopeChecker } from '../scopes.js';
 import type { Organization, OrganizationMember, Invitation } from '../types.js';
+import { getRequestContext, readContext } from '../context.js';
 import { textResult, errorResult, formatOrg } from './helpers.js';
+
+function rejectOrganizationWideAccess(): never {
+  const linked = readContext();
+  const context = getRequestContext();
+  if (!linked || !context.projectId) throw new Error('A linked project context is required.');
+  if (linked.subProjects && new Set(linked.subProjects.map((sub) => sub.path)).size !== linked.subProjects.length) {
+    throw new Error('Ambiguous linked project context.');
+  }
+  throw new Error('Organization-wide operations are unavailable for project-bound API keys.');
+}
 
 export function registerOrganizationTools(
   server: McpServer,
@@ -18,6 +29,7 @@ export function registerOrganizationTools(
     async () => {
       try {
         await scopes.checkScope('organizations:read');
+        rejectOrganizationWideAccess();
         const orgs = await api.get<Organization[]>('/organizations');
         if (!orgs.length) return textResult('No organizations found.');
         return textResult(orgs.map(formatOrg).join('\n\n'));
@@ -38,6 +50,7 @@ export function registerOrganizationTools(
     async ({ name, description }) => {
       try {
         await scopes.checkScope('organizations:write');
+        rejectOrganizationWideAccess();
         const org = await api.post<Organization>('/organizations', {
           name,
           description,
@@ -59,6 +72,7 @@ export function registerOrganizationTools(
     async ({ organizationId }) => {
       try {
         await scopes.checkScope('organizations:read');
+        rejectOrganizationWideAccess();
         const members = await api.get<OrganizationMember[]>(
           `/organizations/${organizationId}/members`,
         );
@@ -89,6 +103,7 @@ export function registerOrganizationTools(
     async ({ organizationId, email, role }) => {
       try {
         await scopes.checkScope('invitations:write');
+        rejectOrganizationWideAccess();
         const inv = await api.post<Invitation>(
           `/organizations/${organizationId}/invitations`,
           { email, role },

@@ -2,7 +2,18 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { ApiClient } from '../api-client.js';
 import type { ScopeChecker } from '../scopes.js';
+import { getRequestContext, readContext } from '../context.js';
 import { textResult, errorResult } from './helpers.js';
+
+function rejectUnboundActivityRequest(): void {
+  const linked = readContext();
+  const context = getRequestContext();
+  if (!linked || !context.projectId) throw new Error('A linked project context is required.');
+  if (linked.subProjects && new Set(linked.subProjects.map((sub) => sub.path)).size !== linked.subProjects.length) {
+    throw new Error('Ambiguous linked project context.');
+  }
+  throw new Error('Activity daily summary has no confirmed project-bound API-key route.');
+}
 
 export function registerActivityTools(
   server: McpServer,
@@ -19,11 +30,8 @@ export function registerActivityTools(
     async ({ date }) => {
       try {
         await scopes.checkScope('activity:read');
-        const params: Record<string, string | undefined> = { date };
-        const summary = await api.get<Record<string, unknown>>(
-          '/activity/daily-summary',
-          params,
-        );
+        rejectUnboundActivityRequest();
+        const summary = await api.get<Record<string, unknown>>('/activity/daily-summary', { date });
 
         const dateStr = date || new Date().toISOString().split('T')[0];
         const lines = [`Daily Summary for ${dateStr}`, ''];

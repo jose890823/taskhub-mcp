@@ -3,7 +3,22 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { ApiClient } from '../api-client.js';
 import type { ScopeChecker } from '../scopes.js';
 import type { Comment } from '../types.js';
+import { getRequestContext, readContext, withProjectContext } from '../context.js';
 import { textResult, errorResult, formatComment } from './helpers.js';
+
+function projectRequest() {
+  const linked = readContext();
+  const context = getRequestContext();
+  if (!linked || !context.projectId) throw new Error('A linked project context is required.');
+  if (linked.subProjects && new Set(linked.subProjects.map((sub) => sub.path)).size !== linked.subProjects.length) {
+    throw new Error('Ambiguous linked project context.');
+  }
+  return withProjectContext({}, context);
+}
+
+function scopedPath(path: string, params: Record<string, string | undefined>): string {
+  return `${path}?projectId=${encodeURIComponent(params.projectId!)}`;
+}
 
 export function registerCommentTools(
   server: McpServer,
@@ -20,7 +35,8 @@ export function registerCommentTools(
     async ({ taskId }) => {
       try {
         await scopes.checkScope('comments:read');
-        const comments = await api.get<Comment[]>(`/comments/task/${taskId}`);
+        const params = projectRequest();
+        const comments = await api.get<Comment[]>(`/comments/task/${taskId}`, params);
         const arr = Array.isArray(comments) ? comments : [];
         if (!arr.length) return textResult('No comments on this task.');
         return textResult(arr.map(formatComment).join('\n\n'));
@@ -41,7 +57,8 @@ export function registerCommentTools(
     async ({ taskId, content }) => {
       try {
         await scopes.checkScope('comments:write');
-        const comment = await api.post<Comment>('/comments', {
+        const params = projectRequest();
+        const comment = await api.post<Comment>(scopedPath('/comments', params), {
           taskId,
           content,
         });

@@ -3,21 +3,48 @@ import type { Config } from './config.js';
 
 export class AuthRequiredError extends Error {
   constructor() {
-    super(
-      'Not authenticated. Use taskhub_login to sign in, or set TASKHUB_API_TOKEN.',
-    );
+    super('TASKHUB_API_TOKEN is required. Configure an API key before using TaskHub.');
     this.name = 'AuthRequiredError';
   }
 }
 
-export class ApiError extends Error {
+export const API_KEY_INVALID = 'API_KEY_INVALID';
+export const INSUFFICIENT_SCOPE = 'INSUFFICIENT_SCOPE';
+export const PROJECT_ACCESS_DENIED = 'PROJECT_ACCESS_DENIED';
+
+const GENERIC_FAILURE_MESSAGE =
+  'TaskHub request failed. Check your configuration and try again.';
+
+function isConfirmedApiFailure(status: number, code: string): boolean {
+  return (status === 401 && code === API_KEY_INVALID)
+    || (status === 403 && [INSUFFICIENT_SCOPE, PROJECT_ACCESS_DENIED].includes(code));
+}
+
+export function safeApiFailureMessage(status: number, code: string): string {
+  if (status === 401 && code === API_KEY_INVALID) {
+    return 'API key is invalid, expired, revoked, or inactive. Configure a valid TASKHUB_API_TOKEN.';
+  }
+  if (status === 403 && code === INSUFFICIENT_SCOPE) {
+    return 'The API key does not include the required scope. Contact a TaskHub administrator.';
+  }
+  if (status === 403 && code === PROJECT_ACCESS_DENIED) {
+    return 'The API key is not authorized for this project. Verify the project context or contact a TaskHub administrator.';
+  }
+  return GENERIC_FAILURE_MESSAGE;
+}
+
+export class ApiError extends AuthRequiredError {
   constructor(
     public status: number,
     public code: string,
-    message: string,
-    public details?: unknown,
+    _message?: string,
+    _details?: unknown,
   ) {
-    super(message);
+    super();
+    this.code = isConfirmedApiFailure(status, code)
+      ? code
+      : 'UNKNOWN';
+    this.message = safeApiFailureMessage(status, this.code);
     this.name = 'ApiError';
   }
 }
@@ -55,21 +82,6 @@ export class ApiClient {
 
     const url = this.buildUrl(path, params);
     const res = await this.doFetch(url, method, body, token);
-
-    // Retry once on 401 after refresh
-    if (res.status === 401) {
-      try {
-        await this.auth.refresh();
-      } catch {
-        throw new AuthRequiredError();
-      }
-      const newToken = this.auth.getAccessToken();
-      if (!newToken) throw new AuthRequiredError();
-
-      const retry = await this.doFetch(url, method, body, newToken);
-      return this.unwrap<T>(retry);
-    }
-
     return this.unwrap<T>(res);
   }
 
@@ -100,12 +112,8 @@ export class ApiClient {
 
     if (!res.ok) {
       const err = json.error as Record<string, unknown> | undefined;
-      throw new ApiError(
-        res.status,
-        (err?.code as string) || 'UNKNOWN',
-        (err?.message as string) || json.message as string || `Request failed (${res.status})`,
-        err?.details,
-      );
+      const backendCode = typeof err?.code === 'string' ? err.code : '';
+      throw new ApiError(res.status, backendCode, undefined, undefined);
     }
 
     // Unwrap the standard envelope { success, data, ... }

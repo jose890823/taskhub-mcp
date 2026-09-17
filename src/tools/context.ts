@@ -34,7 +34,7 @@ export async function buildNoContextMessage(api: ApiClient): Promise<string> {
       lines.push('No projects found. Create one with taskhub_project_create first.');
     }
   } catch {
-    lines.push('Could not fetch projects (are you logged in?). Use taskhub_login first.');
+    lines.push('Could not fetch projects. Configure TASKHUB_API_TOKEN with a valid API key and try again.');
   }
 
   return lines.join('\n');

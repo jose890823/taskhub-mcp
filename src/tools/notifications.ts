@@ -3,7 +3,22 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { ApiClient } from '../api-client.js';
 import type { ScopeChecker } from '../scopes.js';
 import type { Notification } from '../types.js';
+import { getRequestContext, readContext, withProjectContext } from '../context.js';
 import { textResult, errorResult, formatNotification } from './helpers.js';
+
+function projectRequest(params: Record<string, string | undefined>) {
+  const linked = readContext();
+  const context = getRequestContext();
+  if (!linked || !context.projectId) throw new Error('A linked project context is required.');
+  if (linked.subProjects && new Set(linked.subProjects.map((sub) => sub.path)).size !== linked.subProjects.length) {
+    throw new Error('Ambiguous linked project context.');
+  }
+  return withProjectContext(params, context);
+}
+
+function scopedPath(path: string, params: Record<string, string | undefined>): string {
+  return `${path}?projectId=${encodeURIComponent(params.projectId!)}`;
+}
 
 export function registerNotificationTools(
   server: McpServer,
@@ -25,11 +40,12 @@ export function registerNotificationTools(
           page: page?.toString(),
           limit: limit?.toString(),
         };
+        const scopedParams = projectRequest(params);
         const result = await api.get<{
           data: Notification[];
           unreadCount: number;
           pagination: { total: number; page: number; limit: number; totalPages: number };
-        }>('/v1/notifications', params);
+        }>('/v1/notifications', scopedParams);
 
         // The API wraps notifications in { data, unreadCount, pagination }
         // but our ApiClient unwraps the outer envelope, so result IS the inner data
@@ -60,12 +76,13 @@ export function registerNotificationTools(
     async ({ notificationId }) => {
       try {
         await scopes.checkScope('notifications:write');
+        const params = projectRequest({});
 
         if (notificationId) {
-          await api.post<Notification>(`/v1/notifications/${notificationId}/read`);
+          await api.post<Notification>(scopedPath(`/v1/notifications/${notificationId}/read`, params));
           return textResult(`Notification ${notificationId} marked as read.`);
         } else {
-          const result = await api.post<{ marked: number }>('/v1/notifications/read-all');
+          const result = await api.post<{ marked: number }>(scopedPath('/v1/notifications/read-all', params));
           return textResult(`All notifications marked as read (${result.marked} updated).`);
         }
       } catch (e) {

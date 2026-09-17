@@ -12,21 +12,23 @@ import { registerTaskTools } from './tasks.js';
 import { registerCommentTools } from './comments.js';
 import { registerNotificationTools } from './notifications.js';
 import { registerActivityTools } from './activity.js';
+import { registerStatusTools } from './statuses.js';
 
 export function registerAllTools(
   server: McpServer,
-  auth: AuthManager,
+  _auth: AuthManager,
   api: ApiClient,
   scopes: ScopeChecker,
 ): void {
-  registerAuthTools(server, auth, api, scopes);      // 2 tools
+  registerAuthTools(server, api, scopes);             // 1 tool
   registerContextTools(server, api, scopes);          // 2 tools
   registerSearchTools(server, api, scopes);           // 1 tool
   registerOrganizationTools(server, api, scopes);     // 4 tools
-  registerProjectTools(server, api, scopes);          // 4 tools
-  registerTaskTools(server, api, scopes);             // 7 tools
+  registerProjectTools(server, api, scopes);          // 5 tools (+project_members)
+  registerStatusTools(server, api, scopes);           // 1 tool (statuses)
+  registerTaskTools(server, api, scopes);             // 9 tools (+task_get, +task_delete)
   registerCommentTools(server, api, scopes);          // 2 tools
   registerNotificationTools(server, api, scopes);     // 2 tools
   registerActivityTools(server, api, scopes);         // 1 tool
-  // Total: 25 tools
+  // Total: 28 tools
 }

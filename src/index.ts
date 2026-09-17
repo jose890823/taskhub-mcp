@@ -7,6 +7,7 @@ import { AuthManager } from './auth.js';
 import { ApiClient } from './api-client.js';
 import { ScopeChecker } from './scopes.js';
 import { registerAllTools } from './tools/index.js';
+import { writeStartupDiagnostic } from './tools/helpers.js';
 
 async function main() {
   const config = loadConfig();
@@ -24,10 +25,10 @@ async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
 
-  console.error(`TaskHub MCP Server running (API: ${config.apiUrl})`);
+  writeStartupDiagnostic(config.apiUrl);
 }
 
-main().catch((err) => {
-  console.error('Fatal error:', err);
+main().catch(() => {
+  console.error('TaskHub MCP Server failed to start. Check your configuration and try again.');
   process.exit(1);
 });

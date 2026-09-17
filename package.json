@@ -1,18 +1,26 @@
 {
   "name": "taskhub-mcp",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "MCP Server for TaskHub — full platform control via Claude Code",
   "type": "module",
+  "main": "./dist/index.js",
+  "exports": "./dist/index.js",
   "bin": {
     "taskhub-mcp": "./dist/index.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "LICENSE",
+    "README.md"
   ],
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
     "start": "node dist/index.js",
+    "test": "vitest run --exclude tests/live.test.ts",
+    "test:live": "TASKHUB_MCP_LIVE=1 vitest run tests/live.test.ts",
+    "test:package": "node tests/package-validation.mjs",
+    "test:watch": "vitest",
     "prepublishOnly": "pnpm run build"
   },
   "dependencies": {
@@ -21,7 +29,8 @@
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
-    "typescript": "^5.6.0"
+    "typescript": "^5.6.0",
+    "vitest": "^4.1.2"
   },
   "engines": {
     "node": ">=18.0.0"
@@ -36,6 +45,11 @@
     "url": "https://github.com/jose890823/taskhub-mcp"
   },
   "homepage": "https://github.com/jose890823/taskhub-mcp#readme",
-  "keywords": ["mcp", "taskhub", "claude", "task-management"],
+  "keywords": [
+    "mcp",
+    "taskhub",
+    "claude",
+    "task-management"
+  ],
   "license": "MIT"
 }

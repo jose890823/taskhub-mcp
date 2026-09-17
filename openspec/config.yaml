@@ -1,0 +1,56 @@
+schema: spec-driven
+
+context: |
+  Project: taskhub-mcp, an independent TypeScript ESM MCP server for TaskHub.
+  Stack: Node.js >=18, TypeScript 5.6, @modelcontextprotocol/sdk, Zod, Vitest, pnpm.
+  Architecture: manually wired composition root; stdio/JSON-RPC transport; REST adapter to the TaskHub API.
+  Conventions: domain tools under src/tools, strict TypeScript, formatted text responses, console.error-only logging.
+
+strict_tdd: true
+
+testing:
+  detected: 2026-09-16
+  strict_tdd: true
+  strict_tdd_basis: "The authoritative workspace is this repository root, it contains one discovered project, and package.json exposes the explicit workspace test command pnpm test."
+  workspace_test_command: "pnpm test"
+  projects:
+    - path: "."
+      stack: "TypeScript ESM on Node.js"
+      test_command: "pnpm test"
+      framework: "Vitest 4"
+      test_layers:
+        unit: false
+        integration: true
+        e2e: false
+      coverage_command: null
+      build_command: "pnpm run build"
+      typecheck_command: "pnpm exec tsc --noEmit"
+      lint_command: null
+      formatter_command: null
+      evidence: "tests/integration.test.ts is a live-backend integration suite; pnpm exec tsc --noEmit passed during initialization."
+
+rules:
+  proposal:
+    - Include a rollback plan for risky changes.
+  specs:
+    - Use Given/When/Then scenarios.
+    - Use RFC 2119 keywords (MUST, SHALL, SHOULD, MAY).
+  design:
+    - Document architecture decisions with rationale.
+    - Include sequence diagrams for complex flows.
+  tasks:
+    - Group work by phase and use hierarchical numbering.
+    - Keep tasks completable in one session.
+  apply:
+    guidelines:
+      - Follow the existing manual dependency-injection and domain-tool patterns.
+      - Preserve stdout for MCP JSON-RPC only; send diagnostics to stderr.
+    tdd: true
+    test_command: "pnpm test"
+  verify:
+    test_command: "pnpm test"
+    build_command: "pnpm run build"
+    typecheck_command: "pnpm exec tsc --noEmit"
+    coverage_threshold: 0
+  archive:
+    - Warn before merging destructive deltas.

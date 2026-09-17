@@ -27,20 +27,6 @@ export interface ApiError {
   path: string;
 }
 
-// ─── Auth ─────────────────────────────────────────────────────────
-export interface Credentials {
-  accessToken: string;
-  refreshToken: string;
-  apiUrl: string;
-  savedAt: string;
-}
-
-export interface LoginResponse {
-  accessToken: string;
-  refreshToken: string;
-  user: User;
-}
-
 export interface User {
   id: string;
   email: string;

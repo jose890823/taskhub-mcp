@@ -2,7 +2,18 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { ApiClient } from '../api-client.js';
 import type { ScopeChecker } from '../scopes.js';
+import { getRequestContext, readContext, withProjectContext } from '../context.js';
 import { textResult, errorResult } from './helpers.js';
+
+function projectRequest(params: Record<string, string | undefined>) {
+  const linked = readContext();
+  const context = getRequestContext();
+  if (!linked || !context.projectId) throw new Error('A linked project context is required.');
+  if (linked.subProjects && new Set(linked.subProjects.map((sub) => sub.path)).size !== linked.subProjects.length) {
+    throw new Error('Ambiguous linked project context.');
+  }
+  return withProjectContext(params, context);
+}
 
 export function registerSearchTools(
   server: McpServer,
@@ -17,10 +28,11 @@ export function registerSearchTools(
     },
     async ({ code }) => {
       try {
-        await scopes.checkScope('search');
+        await scopes.checkScope('search:read');
+        const params = projectRequest({ code });
         const result = await api.get<{ type: string; entity: Record<string, unknown> }>(
           '/search',
-          { code },
+          params,
         );
 
         const lines = [

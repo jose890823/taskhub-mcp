@@ -3,9 +3,18 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { ApiClient } from '../api-client.js';
 import type { ScopeChecker } from '../scopes.js';
 import type { Project, ProjectDetail, ProjectMember, TaskStatus, Invitation } from '../types.js';
-import { readContext, writeContext } from '../context.js';
-import { buildNoContextMessage } from './context.js';
+import { getRequestContext, readContext, withProjectContext, writeContext } from '../context.js';
 import { textResult, errorResult, formatProject, formatMember, paginationInfo } from './helpers.js';
+
+function requireProjectParams(params: Record<string, string | undefined>) {
+  const linked = readContext();
+  const context = getRequestContext();
+  if (!linked || !context.projectId) throw new Error('A linked project context is required.');
+  if (linked?.subProjects && new Set(linked.subProjects.map((sub) => sub.path)).size !== linked.subProjects.length) {
+    throw new Error('Ambiguous linked project context.');
+  }
+  return { linked, context, params: withProjectContext(params, context) };
+}
 
 export function registerProjectTools(
   server: McpServer,
@@ -23,9 +32,10 @@ export function registerProjectTools(
     async ({ organizationId, personal }) => {
       try {
         await scopes.checkScope('projects:read');
-        const params: Record<string, string | undefined> = {};
-        if (organizationId) params.organizationId = organizationId;
-        if (personal) params.personal = 'true';
+        const { params } = requireProjectParams({
+          organizationId,
+          personal: personal ? 'true' : undefined,
+        });
 
         const projects = await api.get<Project[]>('/projects', params);
         if (!Array.isArray(projects) || !projects.length)
@@ -50,23 +60,24 @@ export function registerProjectTools(
     async ({ projectId, slug }) => {
       try {
         await scopes.checkScope('projects:read');
+        const { context, params } = requireProjectParams({ projectId });
         let project: ProjectDetail;
 
         if (projectId) {
-          project = await api.get<ProjectDetail>(`/projects/${projectId}`);
+          project = await api.get<ProjectDetail>(`/projects/${projectId}`, params);
         } else if (slug) {
-          project = await api.get<ProjectDetail>(`/projects/by-slug/${slug}`);
+          project = await api.get<ProjectDetail>(`/projects/by-slug/${slug}`, params);
         } else {
           return errorResult('Provide projectId or slug');
         }
 
-        const pid = project.id;
+        const pid = context.projectId;
 
         // Fetch related data from separate endpoints
         const [statuses, members, modules] = await Promise.all([
-          api.get<TaskStatus[]>(`/projects/${pid}/statuses`).catch(() => []),
-          api.get<ProjectDetail['members']>(`/projects/${pid}/members`).catch(() => []),
-          api.get<ProjectDetail['modules']>(`/projects/${pid}/modules`).catch(() => []),
+          api.get<TaskStatus[]>(`/projects/${pid}/statuses`, params).catch(() => []),
+          api.get<ProjectDetail['members']>(`/projects/${pid}/members`, params).catch(() => []),
+          api.get<ProjectDetail['modules']>(`/projects/${pid}/modules`, params).catch(() => []),
         ]);
 
         const lines = [formatProject(project)];
@@ -117,11 +128,14 @@ export function registerProjectTools(
     async ({ name, description, organizationId, parentId }) => {
       try {
         await scopes.checkScope('projects:write');
+        const { context, params } = requireProjectParams({});
         const project = await api.post<Project>('/projects', {
           name,
           description,
           organizationId,
           parentId,
+          projectId: context.projectId,
+          ...params,
         });
         return textResult(`Project created:\n${formatProject(project)}`);
       } catch (e) {
@@ -145,9 +159,10 @@ export function registerProjectTools(
     async ({ projectId, email, role }) => {
       try {
         await scopes.checkScope('invitations:write');
+        const { params } = requireProjectParams({ projectId });
         const inv = await api.post<Invitation>(
           `/projects/${projectId}/invitations`,
-          { email, role },
+          { email, role, ...params },
         );
         return textResult(
           `Invitation sent to ${email} as ${role}.\n` +
@@ -170,22 +185,17 @@ export function registerProjectTools(
       try {
         await scopes.checkScope('projects:read');
 
-        const ctx = readContext();
-        const pid = projectId || ctx?.projectId;
+        const { linked, params } = requireProjectParams({ projectId });
+        const pid = projectId || linked?.projectId;
 
-        if (!pid) {
-          const msg = await buildNoContextMessage(api);
-          return textResult(msg);
-        }
-
-        const members = await api.get<ProjectMember[]>(`/projects/${pid}/members`);
+        const members = await api.get<ProjectMember[]>(`/projects/${pid}/members`, params);
         const arr = Array.isArray(members) ? members : [];
 
         if (!arr.length) return textResult('No members found in this project.');
 
         let header = '';
-        if (!projectId && ctx) {
-          header = `[Project: ${ctx.projectName}]\n\n`;
+        if (!projectId && linked) {
+          header = `[Project: ${linked.projectName}]\n\n`;
         }
 
         return textResult(
@@ -209,17 +219,13 @@ export function registerProjectTools(
     async ({ path: subPath, projectId, projectName }) => {
       try {
         await scopes.checkScope('projects:write');
-        const ctx = readContext();
-        if (!ctx) {
-          const msg = await buildNoContextMessage(api);
-          return textResult(msg);
-        }
+        const { linked: ctx, params } = requireProjectParams({});
 
         let resolvedProject: Project;
 
         if (projectId) {
           // Map to existing project
-          resolvedProject = await api.get<Project>(`/projects/${projectId}`);
+          resolvedProject = await api.get<Project>(`/projects/${projectId}`, params);
           // Validate the project is actually a child of the root project.
           // Using strict inequality (no short-circuit) so null parentId (root project) is also rejected.
           if (resolvedProject.parentId !== ctx.projectId) {
@@ -234,6 +240,8 @@ export function registerProjectTools(
             name: projectName,
             parentId: ctx.projectId,
             organizationId: ctx.organizationId,
+            projectId: ctx.projectId,
+            ...params,
           });
         } else {
           return errorResult('Provide projectId (existing) or projectName (to create new sub-project)');
@@ -277,10 +285,7 @@ export function registerProjectTools(
     async ({ path: subPath }) => {
       try {
         await scopes.checkScope('projects:write');
-        const ctx = readContext();
-        if (!ctx) {
-          return errorResult('No project linked. Use taskhub_connect first.');
-        }
+        const { linked: ctx } = requireProjectParams({});
         if (!ctx.subProjects || ctx.subProjects.length === 0) {
           return errorResult('No sub-projects configured.');
         }
