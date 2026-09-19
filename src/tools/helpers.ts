@@ -1,4 +1,4 @@
-import type { Task, TaskStatus, Project, ProjectMember, Organization, Comment, Notification } from '../types.js';
+import type { Task, TaskStatus, Project, ProjectMember, Organization, Comment, Notification, TaskAiUsageSummary } from '../types.js';
 import { ApiError, AuthRequiredError } from '../api-client.js';
 
 export const DIAGNOSTIC_ENDPOINT_LABEL = 'configured endpoint';
@@ -50,6 +50,19 @@ export function formatTask(t: Task): string {
   if (t.scheduledDate) parts.push(`  Scheduled: ${t.scheduledDate}`);
   if (t.completedAt) parts.push(`  Completed: ${t.completedAt}`);
   if (t.description) parts.push(`  Description: ${t.description.substring(0, 200)}${t.description.length > 200 ? '...' : ''}`);
+  if (t.aiUsage) parts.push(formatTaskAiUsageSummary(t.aiUsage));
+  return parts.join('\n');
+}
+
+export function formatTaskAiUsageSummary(summary: TaskAiUsageSummary): string {
+  const total = summary.totalTokens === null ? 'unknown' : String(summary.totalTokens);
+  const parts = [
+    `  AI usage: ${summary.status} | Executions: ${summary.executionCount} | Total tokens: ${total}`,
+  ];
+  if (summary.confirmedTotalTokens !== null && summary.totalTokens === null) {
+    parts.push(`  Confirmed recorded tokens: ${summary.confirmedTotalTokens}`);
+  }
+  if (summary.reasons.length) parts.push(`  Usage reasons: ${summary.reasons.join(' | ')}`);
   return parts.join('\n');
 }
 

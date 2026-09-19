@@ -2,7 +2,7 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { ApiClient } from '../api-client.js';
 import type { ScopeChecker } from '../scopes.js';
-import type { Task, TaskStatus, ProjectDetail } from '../types.js';
+import type { Task, TaskAiUsageSummary, TaskStatus, ProjectDetail } from '../types.js';
 import { getRequestContext, readContext, withProjectContext } from '../context.js';
 import {
   textResult,
@@ -10,6 +10,7 @@ import {
   formatTask,
   formatTaskList,
   paginationInfo,
+  formatTaskAiUsageSummary,
 } from './helpers.js';
 
 function projectRequest(
@@ -266,6 +267,58 @@ export function registerTaskTools(
 
         const task = await api.patch<Task>(scopedPath(`/tasks/${taskId}`, params), body);
         return textResult(`Task updated:\n${formatTask(task)}`);
+      } catch (e) {
+        return errorResult(e);
+      }
+    },
+  );
+
+  // ─── taskhub_task_ai_usage_record ───────────────────────────────
+  server.tool(
+    'taskhub_task_ai_usage_record',
+    'Record one provider-agnostic AI usage execution for a task. Usage must come from the reporting client; this tool never estimates tokens from task content.',
+    {
+      taskId: z.string().describe('Task UUID or systemCode (TSK-XXXXXX-XXXX)'),
+      status: z.enum(['recorded', 'not_registered', 'partial', 'not_applicable']).describe('Usage reporting status'),
+      provider: z.string().optional().describe('AI provider name'),
+      model: z.string().optional().describe('AI model name'),
+      source: z.string().optional().describe('Reporting client or source'),
+      executionId: z.string().optional().describe('Optional provider/client execution ID used for idempotency'),
+      inputTokens: z.number().int().min(0).optional().describe('Confirmed input token count'),
+      outputTokens: z.number().int().min(0).optional().describe('Confirmed output token count'),
+      totalTokens: z.number().int().min(0).optional().describe('Confirmed total token count'),
+      reasonCode: z.string().optional().describe('Reason code when usage is unavailable or partial'),
+      reason: z.string().optional().describe('Human-readable usage reason'),
+    },
+    async ({ taskId, status, provider, model, source, executionId, inputTokens, outputTokens, totalTokens, reasonCode, reason }) => {
+      try {
+        await scopes.checkScope('tasks:write');
+        const { params } = projectRequest({});
+        const body: Record<string, unknown> = {
+          status,
+          provider,
+          model,
+          source,
+          executionId,
+          inputTokens,
+          outputTokens,
+          totalTokens,
+          reasonCode,
+          reason,
+        };
+        for (const [key, value] of Object.entries(body)) {
+          if (value === undefined) delete body[key];
+        }
+
+        const result = await api.post<{
+          execution: unknown;
+          summary: TaskAiUsageSummary;
+          idempotent: boolean;
+        }>(scopedPath(`/tasks/${taskId}/ai-usage`, params), body);
+        const idempotencyNote = result.idempotent ? ' (existing execution returned; no duplicate was created)' : '';
+        return textResult(
+          `AI usage ${status}${idempotencyNote}:\n${formatTaskAiUsageSummary(result.summary)}`,
+        );
       } catch (e) {
         return errorResult(e);
       }

@@ -132,6 +132,42 @@ export interface TaskStatus {
   isCompleted: boolean;
 }
 
+export type TaskAiUsageStatus =
+  | 'recorded'
+  | 'not_registered'
+  | 'partial'
+  | 'not_applicable';
+
+export interface TaskAiUsageSummary {
+  status: TaskAiUsageStatus;
+  executionCount: number;
+  inputTokens: number | string | null;
+  outputTokens: number | string | null;
+  totalTokens: number | string | null;
+  confirmedInputTokens: number | string | null;
+  confirmedOutputTokens: number | string | null;
+  confirmedTotalTokens: number | string | null;
+  reasonCodes: string[];
+  reasons: string[];
+}
+
+export interface TaskAiUsageExecution {
+  id: string;
+  taskId: string;
+  provider: string | null;
+  model: string | null;
+  source: string | null;
+  executionId: string | null;
+  inputTokens: number | string | null;
+  outputTokens: number | string | null;
+  totalTokens: number | string | null;
+  status: TaskAiUsageStatus;
+  reasonCode: string | null;
+  reason: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 // ─── Tasks ────────────────────────────────────────────────────────
 export interface Task {
   id: string;
@@ -152,6 +188,7 @@ export interface Task {
   position: number;
   createdAt: string;
   updatedAt: string;
+  aiUsage?: TaskAiUsageSummary;
 }
 
 export interface TaskAssignee {
