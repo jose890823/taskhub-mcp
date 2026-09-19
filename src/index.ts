@@ -17,7 +17,7 @@ async function main() {
 
   const server = new McpServer({
     name: 'taskhub-mcp',
-    version: '1.0.0',
+    version: '1.1.1',
   });
 
   registerAllTools(server, auth, api, scopeChecker);

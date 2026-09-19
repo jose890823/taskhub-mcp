@@ -6,7 +6,7 @@
   "main": "./dist/index.js",
   "exports": "./dist/index.js",
   "bin": {
-    "taskhub-mcp": "dist/index.js"
+    "taskhub-mcp": "./dist/index.js"
   },
   "files": [
     "dist",
