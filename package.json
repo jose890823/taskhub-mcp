@@ -1,12 +1,12 @@
 {
   "name": "taskhub-mcp",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "MCP Server for TaskHub — full platform control via Claude Code",
   "type": "module",
   "main": "./dist/index.js",
   "exports": "./dist/index.js",
   "bin": {
-    "taskhub-mcp": "./dist/index.js"
+    "taskhub-mcp": "dist/index.js"
   },
   "files": [
     "dist",
@@ -42,7 +42,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/jose890823/taskhub-mcp"
+    "url": "git+https://github.com/jose890823/taskhub-mcp.git"
   },
   "homepage": "https://github.com/jose890823/taskhub-mcp#readme",
   "keywords": [
