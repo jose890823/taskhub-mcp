@@ -16,6 +16,14 @@ function requireProjectParams(params: Record<string, string | undefined>) {
   return { linked, context, params: withProjectContext(params, context) };
 }
 
+function getProjectListParams(params: Record<string, string | undefined>) {
+  if (!readContext()) {
+    const context = getRequestContext();
+    return { params: withProjectContext(params, context) };
+  }
+  return requireProjectParams(params);
+}
+
 export function registerProjectTools(
   server: McpServer,
   api: ApiClient,
@@ -32,7 +40,7 @@ export function registerProjectTools(
     async ({ organizationId, personal }) => {
       try {
         await scopes.checkScope('projects:read');
-        const { params } = requireProjectParams({
+        const { params } = getProjectListParams({
           organizationId,
           personal: personal ? 'true' : undefined,
         });

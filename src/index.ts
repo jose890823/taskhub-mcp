@@ -8,8 +8,14 @@ import { ApiClient } from './api-client.js';
 import { ScopeChecker } from './scopes.js';
 import { registerAllTools } from './tools/index.js';
 import { writeStartupDiagnostic } from './tools/helpers.js';
+import { runCredentialCli } from './credentials-cli.js';
 
 async function main() {
+  if (process.argv[2] === 'credentials') {
+    await runCredentialCli(process.argv.slice(3));
+    return;
+  }
+
   const config = loadConfig();
   const auth = new AuthManager(config);
   const api = new ApiClient(config, auth);
@@ -29,6 +35,10 @@ async function main() {
 }
 
 main().catch(() => {
-  console.error('TaskHub MCP Server failed to start. Check your configuration and try again.');
+  if (process.argv[2] === 'credentials') {
+    console.error('TaskHub credential command failed. Check the command and credential-store permissions.');
+  } else {
+    console.error('TaskHub MCP Server failed to start. Check your configuration and try again.');
+  }
   process.exit(1);
 });

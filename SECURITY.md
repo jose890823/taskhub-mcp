@@ -8,15 +8,22 @@
 
 ## Security Model
 
-Authentication is an environment-only API-key contract with no credential persistence or refresh path.
+Authentication uses project-bound API keys. The compatibility environment
+variable remains supported, and the optional local credential store maps project
+UUIDs to keys without changing the backend authorization model.
 
 ### Authentication
-- `TASKHUB_API_TOKEN` is the only accepted credential.
-- The opaque API key is held in memory only; it is never written to disk,
-  converted, or refreshed. The client does not persist passwords or JWTs.
-- Interactive password login, legacy credential files, JWT conversion, and
-  refresh/retry are unavailable. Changing a key requires restarting the MCP
-  process because the token is loaded once.
+- `TASKHUB_API_TOKEN` is the backward-compatible single-project credential.
+- The non-MCP `taskhub-mcp credentials` CLI can store project UUID profiles in
+  the user's platform configuration directory. POSIX writes use a `0600` file
+  and `0700` parent directory where supported.
+- Profile tokens are opaque, are selected dynamically for the effective linked
+  project, and are never rendered by the MCP tools or metadata-only CLI output.
+  The store is not encrypted; filesystem permissions protect it at rest.
+- Interactive password login, JWT conversion, refresh, and retry are
+  unavailable. Profile changes do not require an MCP restart; changing host
+  configuration or the compatibility environment requires restarting the MCP
+  process.
 - Expired, revoked, inactive, malformed, unknown, or verifier-mismatched keys
   require creating and configuring a replacement key.
 
@@ -44,9 +51,13 @@ Authentication is an environment-only API-key contract with no credential persis
   are redacted. Startup diagnostics expose a fixed label, not configuration.
 
 ### File System
-- Only writes `.taskhub.json` in the current working directory (project
-  context); the API key has no filesystem persistence.
-- No arbitrary file access.
+- Writes project metadata to `.taskhub.json` in the current working directory;
+  that file never contains credentials.
+- The explicit credential CLI writes only the configured user-level credential
+  store (defaulting outside repositories). `TASKHUB_CONFIG_DIR` and
+  `TASKHUB_CREDENTIALS_FILE` must be absolute paths.
+- The credential store uses atomic replacement and restrictive permissions where
+  supported. It is local state, not a source-controlled or encrypted vault.
 
 ### Destructive Operations
 - `taskhub_task_delete` requires explicit `confirm: true` parameter
@@ -58,9 +69,11 @@ Authentication is an environment-only API-key contract with no credential persis
 - Configure the key outside source control, validate with `taskhub_whoami`, and
   verify the linked/effective project before project-sensitive operations.
 - Revoke a compromised or obsolete key at the server, create a replacement,
-  update the host environment, and restart the MCP process.
+  update its profile through the non-MCP CLI, and retry. No MCP restart is
+  needed for a profile update.
 - Rollback restores the prior version from versioned source or package. It does
-  not restore or copy credential files; users reconfigure the environment.
+  not restore or copy credential files; users reconfigure the profile or
+  compatibility environment outside source control.
 - Live or mutating checks for this migration require explicit opt-in. The
   harness conversion, package/release proof, and final verification remain
   separate from this documentation update.

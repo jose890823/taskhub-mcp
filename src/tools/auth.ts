@@ -20,11 +20,12 @@ export function registerAuthTools(
         const user = await api.get<User>('/auth/me');
         const scopeList = await scopes.fetchScopes();
         const context = getRequestContext();
+        const role = user.role || user.roles?.join(', ') || 'unknown';
 
         const lines: string[] = [
           `User: ${user.firstName} ${user.lastName}`,
           `Email: ${user.email}`,
-          `Role: ${user.role}`,
+          `Role: ${role}`,
           `Active: ${user.isActive}`,
           ``,
           `Scopes (${scopeList.length}): ${scopeList.join(', ')}`,

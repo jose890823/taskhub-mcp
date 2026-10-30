@@ -34,7 +34,7 @@ export async function buildNoContextMessage(api: ApiClient): Promise<string> {
       lines.push('No projects found. Create one with taskhub_project_create first.');
     }
   } catch {
-    lines.push('Could not fetch projects. Configure TASKHUB_API_TOKEN with a valid API key and try again.');
+    lines.push('Could not fetch projects. Configure TASKHUB_API_TOKEN with a valid API key for discovery without a context. If you already know the project UUID, register its profile and call taskhub_connect with projectId.');
   }
 
   return lines.join('\n');
@@ -103,7 +103,8 @@ export function registerContextTools(
         let project: ProjectDetail;
 
         if (projectId) {
-          project = await api.get<ProjectDetail>(`/projects/${projectId}`);
+          // A project UUID is sufficient to select its profile before a context exists.
+          project = await api.getForProject<ProjectDetail>(projectId, `/projects/${projectId}`);
         } else if (slug) {
           project = await api.get<ProjectDetail>(`/projects/by-slug/${slug}`);
         } else if (systemCode) {

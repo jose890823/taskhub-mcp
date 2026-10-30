@@ -62,7 +62,7 @@ describe('API-key authentication contract', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('keeps HTTPS safety while exposing no credential-file configuration', () => {
+  it('keeps HTTPS safety while exposing the credential-store path without a token', () => {
     process.env.TASKHUB_API_TOKEN = 'thk_test_token';
     process.env.TASKHUB_API_URL = 'http://api.example.com/api';
     expect(() => loadConfig()).toThrow('TASKHUB_API_URL must use HTTPS');
@@ -73,7 +73,7 @@ describe('API-key authentication contract', () => {
       apiUrl: 'https://api.example.com/api',
       apiToken: 'thk_test_token',
     });
-    expect(config).not.toHaveProperty('credentialsPath');
+    expect(config.credentialsPath).toMatch(/credentials\.json$/);
   });
 
   it('ignores legacy credentials and exposes no legacy authentication lifecycle', () => {

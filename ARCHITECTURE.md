@@ -43,9 +43,11 @@ Most protected resource calls follow this path. Example: `taskhub_tasks_list`.
    advisory and does not authorize the request.
 3. **Context resolution** — `readContext()` loads `.taskhub.json` and derives
    the effective `projectId` for project-sensitive work.
-4. **HTTP request** — `ApiClient` issues the selected REST request with one
-   `Authorization: Bearer <TASKHUB_API_TOKEN>` header. A tool may make several
-   backend requests, but the client does not retry a request.
+4. **Credential selection and HTTP request** — `ApiClient` resolves the
+   effective project and selects its local UUID profile, falling back to
+   `TASKHUB_API_TOKEN` for compatibility. It issues the REST request with one
+   bearer header. A tool may make several backend requests, but the client does
+   not retry a request.
 5. **Failure classification** — Confirmed API-key failures are classified into
    safe key, scope, or project guidance; unknown responses receive generic
    guidance.
@@ -68,8 +70,8 @@ no confirmed project-bound API-key route is available. Errors at any step are ca
 | Layer | File | Responsibility |
 |-------|------|----------------|
 | Composition root | `src/index.ts` | Wires config → auth → API → scopes → tools → transport |
-| Configuration | `src/config.ts` | Environment variables and HTTPS enforcement |
-| Authentication | `src/auth.ts` | In-memory environment-only API-key holder |
+| Configuration | `src/config.ts` | Environment variables, credential-store path, and HTTPS enforcement |
+| Authentication | `src/auth.ts` | Dynamic UUID profile selection with environment fallback |
 | HTTP transport | `src/api-client.ts` | Verbs, one bearer request, safe failures, envelope unwrap |
 | Scope preflight | `src/scopes.ts` | Advisory scope cache with TTL |
 | Project context | `src/context.ts` | `.taskhub.json` read/write, sub-project resolution |
@@ -85,12 +87,13 @@ once in `index.ts`. There is no container and no framework.
 
 ## Runtime state
 
-Three separate stores, deliberately kept apart.
+Four separate stores, deliberately kept apart.
 
 | Store | Location | Scope | Committed |
 |-------|----------|-------|-----------|
 | Project link | `.taskhub.json` | Per working directory | Local metadata |
-| API key | `TASKHUB_API_TOKEN` environment variable | Per MCP process | No |
+| Credential profiles | User configuration directory `credentials.json` | Per user, keyed by project UUID | No |
+| Compatibility API key | `TASKHUB_API_TOKEN` environment variable | Per MCP process | No |
 | Endpoint | `TASKHUB_API_URL` env var | Per MCP registration | In `.mcp.json` |
 
 ### `.taskhub.json`
@@ -121,23 +124,29 @@ the parent. No match falls back to the parent project.
 > `contextDir` explicitly where accuracy matters. This is documented inline in
 > `src/context.ts`.
 
-### API key
+### Credential profiles and API key
 
-`TASKHUB_API_TOKEN` is the only credential input. `AuthManager` reads the opaque
-value once at startup and keeps it in memory. It never reads or writes a
-credential file, persists tokens, converts legacy values, or refreshes after a
-failure. Switching endpoints therefore requires an explicit environment
-configuration and a project-bound key.
+The non-MCP `taskhub-mcp credentials` CLI stores opaque project-bound API keys
+under stable project UUIDs in the user's platform configuration directory. The
+store is outside repositories, written atomically with restrictive POSIX
+permissions where supported, and is never copied into `.taskhub.json`.
+
+`AuthManager` reloads the selected profile as requests are made. A profile for
+the effective project takes precedence over `TASKHUB_API_TOKEN`; the environment
+variable remains the compatibility fallback when no profile exists. The server
+never probes every profile. Profile updates and context switches are dynamic;
+host command, endpoint, or environment changes require a process restart.
 
 ---
 
 ## Authentication
 
-The server uses an environment-only API-key contract. `TASKHUB_API_TOKEN` is
-sent as one bearer value per request over HTTPS. A missing key prevents the
-request before network access; an `API_KEY_INVALID` response requires creating
-and configuring a replacement key. There is no password login, persistence,
-conversion, refresh, or retry path.
+The server uses one project-bound API key per request over HTTPS. The key comes
+from the effective project's protected local profile or, when no profile exists,
+from `TASKHUB_API_TOKEN`. A missing key prevents the request before network
+access; an `API_KEY_INVALID` response requires creating and configuring a
+replacement key. There is no password login, JWT conversion, refresh, or retry
+path. The local store is protected filesystem state, not an encrypted vault.
 
 ---
 
@@ -283,7 +292,7 @@ stream and breaks the server. This is the most common way to break an MCP.
 | Build | `tsc` → `dist/`, entrypoint `dist/index.js`, `bin: taskhub-mcp` |
 | Tests | Vitest (`pnpm test`) |
 | Default endpoint | `http://localhost:3001/api` |
-| Env vars | `TASKHUB_API_URL`, `TASKHUB_API_TOKEN` |
+| Env vars | `TASKHUB_API_URL`, `TASKHUB_API_TOKEN`, `TASKHUB_CONFIG_DIR`, `TASKHUB_CREDENTIALS_FILE` |
 
 ### Registration
 
@@ -293,10 +302,9 @@ stream and breaks the server. This is the most common way to break an MCP.
     "taskhub": {
       "command": "node",
       "args": ["/absolute/path/to/taskhub-mcp/dist/index.js"],
-      "env": {
-        "TASKHUB_API_URL": "http://localhost:3001/api",
-        "TASKHUB_API_TOKEN": "<provided-outside-source-control>"
-      }
+        "env": {
+          "TASKHUB_API_URL": "http://localhost:3001/api"
+        }
     }
   }
 }
@@ -316,7 +324,9 @@ stream and breaks the server. This is the most common way to break an MCP.
    `errorResult(e)`.
 6. Add a formatter to `helpers.ts` if the shape is new.
 7. Register the module in `src/tools/index.ts` if it is new.
-8. `pnpm run build`, then restart the MCP host.
+8. `pnpm run build`, then restart the MCP host when the command, endpoint, or
+   host environment changes. Profile and context changes are selected per
+   request.
 
 Invariants to preserve:
 

@@ -107,6 +107,28 @@ describe('project-bound tool context', () => {
     expect(text).not.toContain('Bearer');
   });
 
+  it.each([
+    [{ roles: ['super_admin'] }, 'super_admin'],
+    [{ role: '', roles: ['user'] }, 'user'],
+    [{ role: '', roles: [] }, 'unknown'],
+  ])('formats the whoami role when the backend omits the serialized getter', async (identity, expectedRole) => {
+    const server = makeServer();
+    const api = makeApi();
+    api.get.mockResolvedValueOnce({
+      firstName: 'Ada',
+      lastName: 'Lovelace',
+      email: 'ada@example.com',
+      ...identity,
+      isActive: true,
+    });
+
+    registerAuthTools(server as never, api as never, scopes as never);
+
+    const result = await server.handlers.get('taskhub_whoami')!({});
+
+    expect(result.content[0].text).toContain(`Role: ${expectedRole}`);
+  });
+
   it('reports missing local context without exposing credential material', async () => {
     const server = makeServer();
     const api = makeApi();
@@ -147,6 +169,17 @@ describe('project-bound tool context', () => {
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toBe('Error: TaskHub request failed. Check your configuration and try again.');
     expect(api.get).not.toHaveBeenCalled();
+  });
+
+  it('allows bounded project discovery without context through the environment fallback', async () => {
+    const server = makeServer();
+    const api = makeApi();
+    api.get.mockResolvedValueOnce([]);
+    registerProjectTools(server as never, api as never, scopes as never);
+
+    await server.handlers.get('taskhub_projects_list')!({});
+
+    expect(api.get).toHaveBeenCalledWith('/projects', {});
   });
 
   it('propagates one effective project and rejects a silent project override', async () => {

@@ -1,9 +1,12 @@
 import type { AuthManager } from './auth.js';
 import type { Config } from './config.js';
+import { getRequestContext, type RequestContext } from './context.js';
 
 export class AuthRequiredError extends Error {
-  constructor() {
-    super('TASKHUB_API_TOKEN is required. Configure an API key before using TaskHub.');
+  constructor(projectId?: string | null) {
+    super(projectId
+      ? 'No credential is configured for the linked project. Register its project UUID with `taskhub-mcp credentials add` or set TASKHUB_API_TOKEN for compatibility.'
+      : 'No TaskHub API key is configured. Set TASKHUB_API_TOKEN for discovery, or register a project profile with `taskhub-mcp credentials add`.');
     this.name = 'AuthRequiredError';
   }
 }
@@ -22,7 +25,7 @@ function isConfirmedApiFailure(status: number, code: string): boolean {
 
 export function safeApiFailureMessage(status: number, code: string): string {
   if (status === 401 && code === API_KEY_INVALID) {
-    return 'API key is invalid, expired, revoked, or inactive. Configure a valid TASKHUB_API_TOKEN.';
+    return 'API key is invalid, expired, revoked, or inactive. Configure a valid project profile or TASKHUB_API_TOKEN.';
   }
   if (status === 403 && code === INSUFFICIENT_SCOPE) {
     return 'The API key does not include the required scope. Contact a TaskHub administrator.';
@@ -53,10 +56,19 @@ export class ApiClient {
   constructor(
     private config: Config,
     private auth: AuthManager,
+    private readonly contextResolver: () => RequestContext = () => getRequestContext(),
   ) {}
 
   async get<T>(path: string, params?: Record<string, string | undefined>): Promise<T> {
     return this.request<T>('GET', path, undefined, params);
+  }
+
+  async getForProject<T>(
+    projectId: string,
+    path: string,
+    params?: Record<string, string | undefined>,
+  ): Promise<T> {
+    return this.request<T>('GET', path, undefined, params, projectId);
   }
 
   async post<T>(path: string, body?: unknown): Promise<T> {
@@ -71,14 +83,20 @@ export class ApiClient {
     return this.request<T>('DELETE', path);
   }
 
+  getCredentialContextKey(): string {
+    return this.auth.getCredentialSource(this.contextResolver().projectId);
+  }
+
   private async request<T>(
     method: string,
     path: string,
     body?: unknown,
     params?: Record<string, string | undefined>,
+    explicitProjectId?: string,
   ): Promise<T> {
-    const token = this.auth.getAccessToken();
-    if (!token) throw new AuthRequiredError();
+    const projectId = explicitProjectId ?? this.contextResolver().projectId;
+    const token = this.auth.getAccessToken(projectId);
+    if (!token) throw new AuthRequiredError(projectId);
 
     const url = this.buildUrl(path, params);
     const res = await this.doFetch(url, method, body, token);

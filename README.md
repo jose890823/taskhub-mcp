@@ -1,206 +1,201 @@
 # TaskHub MCP Server
 
-MCP (Model Context Protocol) server for **TaskHub** — full platform control via Claude Code.
+MCP (Model Context Protocol) server for **TaskHub** — manage tasks, projects,
+organizations, comments, notifications, and activity from an MCP host.
 
-Tools for managing tasks, projects, organizations, comments, notifications, invitations, and activity — all from your terminal through Claude.
+## Quick start
 
-## Quick Start
+### 1. Install the package
 
-### 1. Add to Claude Code config
+Use a published package or a local checkout. The server command can be invoked
+as `taskhub-mcp` after installation, or as `node /absolute/path/to/dist/index.js`.
 
-Add to your `.mcp.json` (project or global):
+### 2. Configure the MCP host
+
+The preferred setup keeps credentials out of host configuration. The API URL is
+optional for local development and should be HTTPS for remote servers.
+
+#### Claude Code
+
+For a project-scoped server, add this to the project's `.mcp.json`. For a
+user/global Claude Code registration, put the same `mcpServers` entry in
+`~/.claude.json` instead:
 
 ```json
 {
   "mcpServers": {
     "taskhub": {
-      "command": "node",
-      "args": ["/path/to/taskhub-mcp/dist/index.js"],
+      "command": "taskhub-mcp",
       "env": {
-        "TASKHUB_API_URL": "http://localhost:3001/api",
-        "TASKHUB_API_TOKEN": "<project-bound-api-key>"
+        "TASKHUB_API_URL": "https://api.taskhub.example/api"
       }
     }
   }
 }
 ```
 
-Or install from GitHub:
+For a local checkout, replace the command with `node` and use
+`["/absolute/path/to/taskhub-mcp/dist/index.js"]` as `args`.
+
+#### OpenCode
+
+Use OpenCode's local MCP `environment` field; do not put project keys in the
+configuration:
 
 ```json
 {
-  "mcpServers": {
+  "mcp": {
     "taskhub": {
-      "command": "npx",
-      "args": ["github:jose890823/taskhub-mcp"],
-      "env": {
-        "TASKHUB_API_URL": "https://api.taskhub.com/api",
-        "TASKHUB_API_TOKEN": "<project-bound-api-key>"
-      }
+      "type": "local",
+      "command": ["taskhub-mcp"],
+      "environment": {
+        "TASKHUB_API_URL": "https://api.taskhub.example/api"
+      },
+      "enabled": true
     }
   }
 }
 ```
 
-### 2. Configure the API key
+If the executable is not on PATH, use a portable launcher script that only
+selects the executable and forwards arguments:
 
-Create a project-bound TaskHub API key, provide it as `TASKHUB_API_TOKEN` in the
-MCP host environment, and restart the MCP process after changing it. The key is
-loaded once and held in memory only; it is not persisted, refreshed, converted,
-or recoverable by the server.
-
-Use `taskhub_whoami` to validate the key and inspect server metadata. There is
-no password login or JWT migration path.
-
-### 3. Link a project
-
-```
-Use taskhub_connect with slug "my-project"
+```sh
+#!/bin/sh
+exec /usr/bin/node /absolute/path/to/taskhub-mcp/dist/index.js "$@"
 ```
 
-This creates `.taskhub.json` in your working directory. Subsequent task operations auto-target this project.
+Point the host's local MCP command at that launcher. This repository does not
+modify Claude Code, OpenCode, or any global host configuration automatically.
 
-## Environment Variables
+### 3. Register project-bound credentials
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `TASKHUB_API_URL` | `http://localhost:3001/api` | TaskHub backend API URL |
-| `TASKHUB_API_TOKEN` | — | The only credential: an opaque project-bound API key held in memory |
+The non-MCP credential CLI reads the key from hidden stdin; never pass a key as
+a model/tool argument, command-line argument, or configuration value:
 
-Remote API URLs must use HTTPS. Plain HTTP is reserved for local development
-with `localhost` or `127.0.0.1`.
+```bash
+taskhub-mcp credentials add --project-id <project-uuid> --label Work
+taskhub-mcp credentials list
+taskhub-mcp credentials update --project-id <project-uuid>
+taskhub-mcp credentials remove --project-id <project-uuid>
+```
 
-## Tools
+The `list` command shows only project UUIDs, optional labels, and update times.
+`--token` is rejected. CLI output is separate from MCP stdio; when the server
+is running, stdout remains reserved for MCP protocol frames.
 
-### Auth & System
-| Tool | Description |
-|------|-------------|
-| `taskhub_whoami` | Current user metadata, server scopes, and linked/effective project context |
+The default store is outside repositories:
 
-### Context
-| Tool | Description |
-|------|-------------|
-| `taskhub_context` | Show project linked to current directory |
-| `taskhub_connect` | Link directory to a project (by ID, slug, or systemCode) |
+- Linux: `$XDG_CONFIG_HOME/taskhub/credentials.json`, or `~/.config/taskhub/credentials.json`
+- macOS: `~/Library/Application Support/TaskHub/credentials.json`
+- Windows: `%APPDATA%/TaskHub/credentials.json`
 
-### Search
-| Tool | Description |
-|------|-------------|
-| `taskhub_search` | Find any entity by systemCode |
+`TASKHUB_CONFIG_DIR` or `TASKHUB_CREDENTIALS_FILE` may select an absolute
+portable location. On POSIX, the store is written as `0600` and its directory
+as `0700` where supported.
 
-### Organizations
-| Tool | Description |
-|------|-------------|
-| `taskhub_orgs_list` | List your organizations |
-| `taskhub_org_create` | Create organization |
-| `taskhub_org_members` | List organization members |
-| `taskhub_org_invite` | Invite user to organization |
+### 4. Link the working directory
 
-### Projects
-| Tool | Description |
-|------|-------------|
-| `taskhub_projects_list` | List projects (filter by org or personal) |
-| `taskhub_project_info` | Detailed project info with members, statuses, modules |
-| `taskhub_project_create` | Create project (org or personal) |
-| `taskhub_project_invite` | Invite user to project |
+With a known UUID, use the profile directly and avoid discovery ambiguity:
 
-### Tasks
-| Tool | Description |
-|------|-------------|
-| `taskhub_tasks_list` | List tasks with filters (auto-targets linked project) |
-| `taskhub_tasks_my` | My assigned/created tasks |
-| `taskhub_tasks_daily` | Daily tasks by date |
-| `taskhub_task_create` | Create task (auto-uses linked project) |
-| `taskhub_task_update` | Update task fields |
-| `taskhub_task_complete` | Mark task as completed (auto-finds completed status) |
-| `taskhub_subtask_create` | Create subtask under parent |
+```text
+Use taskhub_connect with projectId "<project-uuid>"
+```
 
-### Comments
-| Tool | Description |
-|------|-------------|
-| `taskhub_comments` | List comments on a task |
-| `taskhub_comment_add` | Add comment to a task |
+If no context exists and the UUID is not known, temporarily configure the
+backward-compatible `TASKHUB_API_TOKEN`, then call `taskhub_context` or
+`taskhub_projects_list`. They can list the projects visible to that key. Connect
+by `systemCode` or `slug`, or register the UUID profile and connect by
+`projectId`.
 
-### Notifications
-| Tool | Description |
-|------|-------------|
-| `taskhub_notifications` | List notifications + unread count |
-| `taskhub_notification_read` | Mark notification(s) as read |
-
-### Activity
-| Tool | Description |
-|------|-------------|
-| `taskhub_daily_summary` | Daily activity summary |
-
-## Smart Project Detection
-
-When you run `taskhub_connect`, a `.taskhub.json` file is created in your directory:
+The server writes only project metadata to `.taskhub.json`:
 
 ```json
 {
-  "projectId": "uuid",
+  "projectId": "project-uuid",
   "projectName": "My Project",
   "projectSlug": "my-project",
   "systemCode": "PRJ-260219-A3K7",
-  "organizationId": "uuid",
-  "organizationName": "My Org"
+  "organizationId": null,
+  "organizationName": null
 }
 ```
 
-This enables:
-- `taskhub_task_create` auto-assigns to the linked project
-- `taskhub_tasks_list` auto-filters by the linked project
-- Project-sensitive requests use one effective project ID; missing, ambiguous,
-  or mismatched context fails closed rather than switching key bindings
+It never writes a token to that file.
 
-## Authorization and failure contract
+## Multi-project behavior
 
-The client performs advisory scope preflight through `GET /auth/mcp-scopes` and
-may cache the result for five minutes. The cache never authorizes a request or
-overrides server-side key validity, scopes, revocation, or project binding.
+TaskHub still authorizes each API key for one backend project. This feature does
+not weaken that binding or create a multi-project server key. It adds a local
+mapping from stable project UUID to project-bound key.
 
-Only these confirmed backend combinations receive classified guidance:
+For every request, the MCP server re-reads the effective project from
+`.taskhub.json` (including an active sub-project) and selects only that UUID's
+profile. A profile takes precedence over `TASKHUB_API_TOKEN`; when no profile
+exists, the environment variable remains the compatibility fallback. The
+server never tries every profile against an endpoint.
 
-| HTTP | Code | Meaning and action |
-|------|------|-------------------|
-| 401 | `API_KEY_INVALID` | Missing, malformed, unknown, verifier-mismatched, revoked, expired, or inactive key. Configure a valid replacement. A locally absent token fails before any request. |
-| 403 | `INSUFFICIENT_SCOPE` | The key lacks the required scope. Ask a TaskHub administrator to grant the required access. |
-| 403 | `PROJECT_ACCESS_DENIED` | Missing context, project mismatch, or unauthorized project access. Verify the linked project or contact an administrator. |
+`projectId`-first connection can select a profile before a context exists.
+Slug/systemCode discovery cannot identify a profile until the UUID is known, so
+it uses the current context profile or `TASKHUB_API_TOKEN`. If neither is
+available, the error explains the safe next step without exposing a key.
 
-Unknown status/code combinations use generic safe guidance. Tokens, passwords,
-authorization headers, endpoint configuration, and raw backend details are not
-returned in tool errors or startup diagnostics.
+`taskhub_whoami`, project operations, and advisory scope checks use the same
+effective profile. Scope caches are separated by credential context, so
+switching projects cannot reuse another project's cached scopes.
 
-`taskhub_whoami` is metadata-only: it reports user metadata, server scopes, and
-local/effective context, never the API key.
+## Backward compatibility and restart semantics
 
-## Migration, rollout, and rollback
+Existing installations may continue using:
 
-1. Create a new project-bound key; do not convert a password, JWT, or legacy key.
-2. Configure `TASKHUB_API_TOKEN` outside source control and validate with
-   `taskhub_whoami`.
-3. Link the working directory with `taskhub_connect` and verify the effective
-   project before project-sensitive operations.
-4. For a revoked, expired, or inactive key, revoke it at the server, create a
-   replacement, update the host environment, and restart the MCP process.
+```text
+TASKHUB_API_TOKEN=<project-bound-api-key>
+```
 
-To roll back a deployment, stop the MCP process and restore the previously
-published version from its versioned source or package. Reconfigure the
-environment as required; never restore or copy credential files. Any live or
-mutating validation for this migration must be explicitly opted in; its harness
-conversion is tracked separately and is not part of this documentation slice.
+To migrate, register a profile for the linked project's UUID, validate with
+`taskhub_whoami`, then remove the environment key only after the profile works.
+The old variable remains a fallback for contexts without a registered profile.
 
-Package/release validation and the remaining migration test work are tracked
-separately; this README does not claim those checks have passed.
+Changing `.taskhub.json` or adding/updating/removing a credential profile does
+not require an MCP restart: selection occurs on each request. Changing the MCP
+command, `TASKHUB_API_URL`, host environment, or installed package does require
+the MCP host to restart its process. Restart after the initial host setup so it
+loads the new registration.
 
-## Development
+## Security contract
+
+- Credentials are opaque project-bound API keys; there is no password, JWT, or refresh-token migration.
+- Tokens are not rendered by tools, diagnostics, metadata listing, errors, README files, tests, or `.taskhub.json`.
+- The CLI is explicit and non-MCP; it accepts secrets only through hidden stdin.
+- Remote API URLs must use HTTPS. HTTP is reserved for localhost development.
+- The backend remains authoritative for key validity, scopes, revocation, and project access.
+- No normal MCP tool mutates Claude Code, OpenCode, host configuration, or credential files.
+
+## Tools
+
+### Auth and context
+
+| Tool | Description |
+|------|-------------|
+| `taskhub_whoami` | Current user, server scopes, and linked/effective context |
+| `taskhub_context` | Show the linked project or safe discovery guidance |
+| `taskhub_connect` | Link by project UUID, slug, or system code; never accepts a token |
+
+The remaining tools manage organizations, projects, tasks, comments,
+notifications, statuses, and activity. See `GUIA.md` for extension and request
+lifecycle details.
+
+## Development and verification
 
 ```bash
 pnpm install
-pnpm build       # Compile TypeScript
-pnpm dev         # Watch mode
-pnpm start       # Run compiled server
+pnpm test
+pnpm run test:package
+pnpm run build
 ```
+
+Live tests are opt-in and require explicitly authorized test credentials:
+`pnpm run test:live`.
 
 ## License
 
